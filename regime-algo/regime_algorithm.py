@@ -21,30 +21,23 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 print(f"Loaded {len(prices)} trading days, {len(prices.columns)} assets")
 
 
-# ===== ENSEMBLE CONFIG (top N triplets from backtesting_lab) =====
-selected_triplets_path = OUTPUT_DIR / "backtesting_cross_asset_regime_test_summary.csv"
-if not selected_triplets_path.exists():
-    raise FileNotFoundError(
-        f"Missing '{selected_triplets_path}'. Run backtesting_lab first."
-    )
+# ===== ENSEMBLE CONFIG (Selected Ranks 1–11 from `backtesting_cross_asset_regime_test_summary.csv`) =====
+# (regime, defensive, cyclical)
+triplets = [
+    ("Idx_01", "FX_05", "Stock_11"),
+    ("Idx_01", "FX_04", "Comm_06"),
+    ("Idx_01", "FX_03", "Stock_02"),
+    ("Idx_01", "FX_06", "Stock_07"),
+    ("Idx_01", "Stock_08", "Comm_03"),
+    ("Idx_01", "FX_02", "Stock_09"),
+    ("Idx_01", "Stock_13", "Stock_10"),
+    ("Idx_01", "Stock_05", "Stock_06"),
+    ("Idx_01", "Comm_02", "Comm_05"),
+    ("Idx_01", "FX_01", "Stock_03"),
+    ("Idx_01", "Stock_01", "Stock_14"),
+]
 
-selected_triplets = pd.read_csv(selected_triplets_path)
-selected_triplets = selected_triplets.sort_values("Selected Rank").reset_index(drop=True)
-
-N_TRIPLETS = min(11, len(selected_triplets))
-selected_triplets = selected_triplets.iloc[:N_TRIPLETS]
-
-triplets = list(
-    zip(
-        selected_triplets["RegimeAsset"].tolist(),
-        selected_triplets["DefensiveAsset"].tolist(),
-        selected_triplets["CyclicalAsset"].tolist(),
-    )
-)
-if not triplets:
-    raise ValueError("No selected triplets found.")
-
-print(f"Using {len(triplets)} selected triplets for ensemble.")
+print(f"Using {len(triplets)} hardcoded triplets for ensemble.")
 
 
 # ===== STRATEGY PARAMETERS (from backtesting_lab.ipynb) =====
@@ -58,7 +51,12 @@ INDEX_WEIGHT = 0.40
 DEFENSIVE_WEIGHT = 1.00
 CYCLICAL_WEIGHT = 1.00
 INITIAL_CASH = 100_000
-SIGNAL_TO_RETURN_LAG = 0  # bars (matches notebook convention)
+# Same default as `backtesting_lab.ipynb` (`SIGNAL_TO_RETURN_LAG` in the constants cell).
+# That lag is applied inside the *vector* `compute_regime_triplet_backtest` path (shift before
+# multiplying by returns). `TradingSimulator` separately fills orders at the *next* day's close,
+# so simulator P&L will not exactly match the notebook's closed-form equity curve—only the same
+# qualitative delay convention.
+SIGNAL_TO_RETURN_LAG = 2
 
 
 all_assets = sorted({a for t in triplets for a in t})
