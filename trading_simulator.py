@@ -1,5 +1,11 @@
+import os
+
 import pandas as pd
 import numpy as np
+
+# Use a non-interactive backend so `plt.show()` doesn't block when running via CLI.
+import matplotlib
+matplotlib.use("Agg", force=True)
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpecFromSubplotSpec
 
@@ -495,7 +501,9 @@ class TradingSimulator:
 
         plt.savefig(save_file, dpi=150, bbox_inches='tight', facecolor=BG)
         print(f"Saved performance plot to '{save_file}'")
-        plt.show()
+        # Only display interactively if explicitly requested.
+        if os.environ.get("SHOW_PLOTS", "").strip().lower() in {"1", "true", "yes"}:
+            plt.show()
         plt.close()
 
         # Text summary
