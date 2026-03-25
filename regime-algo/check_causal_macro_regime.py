@@ -17,7 +17,7 @@ def run_algorithm() -> pd.DataFrame:
     cmd = (
         "import runpy, trading_simulator; "
         "trading_simulator.TradingSimulator.plot_performance = lambda *a, **k: None; "
-        "runpy.run_path('regime-algo/macro_regime_algorithm.py')"
+        "runpy.run_path('regime-algo/regime_algorithm.py')"
     )
     result = subprocess.run(
         [sys.executable, "-c", cmd],
@@ -27,7 +27,7 @@ def run_algorithm() -> pd.DataFrame:
     )
     if result.returncode != 0:
         raise RuntimeError(
-            f"macro_regime_algorithm.py failed:\n{result.stdout}\n{result.stderr}"
+            f"regime_algorithm.py failed:\n{result.stdout}\n{result.stderr}"
         )
 
     return pd.read_csv(ORDERS_PATH, parse_dates=["Date"])
