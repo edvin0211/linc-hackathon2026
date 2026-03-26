@@ -20,6 +20,36 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 
 print(f"Loaded {len(prices)} trading days, {len(prices.columns)} assets")
 
+# ===== Currency metadata (used for FX hedge scoring) =====
+# Base currency is `Crncy_01` (cash, commodities, and indices).
+# Stocks may be denominated in other currencies; FX instruments are used as hedges.
+equity_ccy = {
+    "Stock_01": "Crncy_03",
+    "Stock_02": "Crncy_04",
+    "Stock_03": "Crncy_04",
+    "Stock_04": "Crncy_02",
+    "Stock_05": "Crncy_03",
+    "Stock_06": "Crncy_02",
+    "Stock_07": "Crncy_03",
+    "Stock_08": "Crncy_02",
+    "Stock_09": "Crncy_04",
+    "Stock_10": "Crncy_03",
+    "Stock_11": "Crncy_01",
+    "Stock_12": "Crncy_04",
+    "Stock_13": "Crncy_01",
+    "Stock_14": "Crncy_01",
+    "Stock_15": "Crncy_01",
+}
+
+fx_pairs_map = {
+    "FX_01": ("Crncy_02", "Crncy_01"),
+    "FX_02": ("Crncy_04", "Crncy_02"),
+    "FX_03": ("Crncy_04", "Crncy_03"),
+    "FX_04": ("Crncy_02", "Crncy_03"),
+    "FX_05": ("Crncy_01", "Crncy_03"),
+    "FX_06": ("Crncy_04", "Crncy_01"),
+}
+
 
 # ===== ENSEMBLE CONFIG (Selected Ranks 1–11 from `backtesting_cross_asset_regime_test_summary.csv`) =====
 # (regime, defensive, cyclical)
@@ -56,7 +86,12 @@ INITIAL_CASH = 100_000
 # multiplying by returns). `TradingSimulator` separately fills orders at the *next* day's close,
 # so simulator P&L will not exactly match the notebook's closed-form equity curve—only the same
 # qualitative delay convention.
-SIGNAL_TO_RETURN_LAG = 2
+SIGNAL_TO_RETURN_LAG = 0
+
+FX_HEDGE_STRENGTH = 1.0
+# 0.0 = no explicit FX hedging overlay (use ensemble FX weights as-is)
+# 1.0 = reduce net foreign currency exposure using FX_01 / FX_05 / FX_06
+#      (partial hedging can be enabled by lowering this value).
 
 
 all_assets = sorted({a for t in triplets for a in t})
@@ -157,7 +192,64 @@ def strategy(row_pos, cash, portfolio, signal_prices, data):
     if date not in target_shares_df.index:
         return []
 
-    targets = target_shares_df.loc[date]
+    # Copy so we can modify FX holdings for hedging without mutating the cached DataFrame.
+    targets = target_shares_df.loc[date].copy()
+
+    # ===== FX hedging overlay (reduce net foreign currency exposure) =====
+    # Goal: make net exposures in foreign currencies (Crncy_02/03/04) closer to 0 by
+    # setting FX_01 / FX_05 / FX_06 targets.
+    fx_hedge_tickers = {
+        "Crncy_02": "FX_01",  # net[Crncy_02] += notional
+        "Crncy_03": "FX_05",  # net[Crncy_03] -= notional  (quote leg)
+        "Crncy_04": "FX_06",  # net[Crncy_04] += notional
+    }
+    base_ccy = "Crncy_01"
+
+    hedge_instruments = set(fx_hedge_tickers.values())
+    net = {}
+
+    # Compute net currency exposure excluding the hedge instruments themselves
+    # (so we can solve for them).
+    for asset in all_assets:
+        if asset in hedge_instruments:
+            continue
+        shares = float(targets.get(asset, 0.0))
+        price = float(signal_prices.get(asset, np.nan))
+        if shares == 0.0 or not np.isfinite(price):
+            continue
+
+        if asset in fx_pairs_map:
+            base, quote = fx_pairs_map[asset]
+            notional = shares * price
+            net[base] = net.get(base, 0.0) + notional
+            net[quote] = net.get(quote, 0.0) - notional
+        else:
+            ccy = equity_ccy.get(asset, base_ccy)
+            net[ccy] = net.get(ccy, 0.0) + shares * price
+
+    # Solve hedge instrument share targets.
+    # Partial hedging: exposure_target = exposure_before * (1 - strength).
+    # Full hedging (strength=1): drives exposure_target to 0.
+    for foreign_ccy, fx_ticker in fx_hedge_tickers.items():
+        if fx_ticker not in all_assets:
+            continue
+        fx_price = float(signal_prices.get(fx_ticker, np.nan))
+        if not np.isfinite(fx_price) or fx_price == 0.0:
+            continue
+
+        exposure_before = float(net.get(foreign_ccy, 0.0))
+        exposure_target = exposure_before * (1.0 - FX_HEDGE_STRENGTH)
+        notional_needed = exposure_target - exposure_before
+
+        # Simulator sign conventions:
+        #  - FX_01: net[Crncy_02] += notional => notional = exposure_target - exposure_before
+        #  - FX_06: net[Crncy_04] += notional => notional = exposure_target - exposure_before
+        #  - FX_05: net[Crncy_03] -= notional => notional = exposure_before - exposure_target
+        if fx_ticker == "FX_05":
+            notional_needed = exposure_before - exposure_target
+
+        targets[fx_ticker] = notional_needed / fx_price
+
     orders = []
 
     for ticker in all_assets:
@@ -175,7 +267,12 @@ def strategy(row_pos, cash, portfolio, signal_prices, data):
 
 
 # ===== RUN SIMULATION =====
-simulator = TradingSimulator(assets=all_assets, initial_cash=INITIAL_CASH)
+simulator = TradingSimulator(
+    assets=all_assets,
+    initial_cash=INITIAL_CASH,
+    equity_currency_map=equity_ccy,
+    fx_pairs_map=fx_pairs_map,
+)
 simulator.run(strategy, prices_assets, prices)
 simulator.save_results(
     orders_file=str(OUTPUT_DIR / "macro_regime_orders.csv"),
