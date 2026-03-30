@@ -5,6 +5,8 @@ from trading_simulator import TradingSimulator
 
 # ===== LOAD DATA =====
 prices = pd.read_csv("prices.csv", index_col="Date", parse_dates=True)
+OUTPUT_DIR = Path("outputs")
+OUTPUT_DIR.mkdir(exist_ok=True)
 
 STOCK_COLS = [c for c in prices.columns if c.startswith("Stock_")]
 FX_COLS    = [c for c in prices.columns if c.startswith("FX_")]
@@ -94,4 +96,4 @@ simulator.save_results(
     orders_file    =  "orders.csv",
     portfolio_file =  "portfolio.csv",
 )
-simulator.plot_performance(prices, save_file="performance_plot.png")
+simulator.plot_performance(prices, save_file=str(OUTPUT_DIR / "performance_plot.png"))
